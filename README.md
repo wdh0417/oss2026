@@ -174,7 +174,7 @@ ClipForge AI는 사용자가 영상 주제를 입력하면 AI가 숏폼용 스�
 - `tools/generate_dashboard_snapshot.py`
 
 ### 샘플 대시보드
-![DORA Dashboard sample](assets/dora_dashboard_sample.svg)
+![DORA Metrics 대시보드 캡처](assets/dora_dashboard_screenshot.png)
 
 ### 사용 방법
 1. GitHub Actions에서 `DORA Metrics Collector` 워크플로우를 실행합니다.
