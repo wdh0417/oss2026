@@ -159,5 +159,30 @@ ClipForge AI는 사용자가 영상 주제를 입력하면 AI가 숏폼용 스�
 - 마케팅용 숏폼 캠페인 제작
 - 소상공인 SNS 홍보 영상 자동 생성
 
+## DORA Metrics 자동 수집
+이 프로젝트는 GitHub Actions를 통해 DORA 4대 지표를 자동으로 수집하고, 배포 성과를 시각적으로 확인할 수 있도록 구성합니다. 이를 통해 개발 프로세스의 속도와 안정성을 정량적으로 점검할 수 있으며, AI 기반 콘텐츠 제작 프로젝트에서도 운영 지표를 함께 관리할 수 있습니다.
+
+- Lead Time for Changes
+- Deployment Frequency
+- MTTR
+- Change Failure Rate
+
+### 포함 파일
+- `.github/workflows/dora-metrics.yml`
+- `github/actions-scripts/compute_dora.py`
+- `dashboard/index.html`
+- `tools/generate_dashboard_snapshot.py`
+
+### 샘플 대시보드
+![DORA Dashboard sample](assets/dora_dashboard_sample.svg)
+
+### 사용 방법
+1. GitHub Actions에서 `DORA Metrics Collector` 워크플로우를 실행합니다.
+2. 실행 후 Artifacts에서 `metrics.json`을 다운로드합니다.
+3. 로컬에서 `dashboard/index.html`을 브라우저로 열어 대시보드를 확인합니다.
+4. `python3 tools/generate_dashboard_snapshot.py`를 실행하면 SVG 스냅샷을 다시 생성할 수 있습니다.
+
+이 자동화 흐름은 최근 30일 동안의 배포 이력, 배포 상태, PR 병합 기록을 기반으로 지표를 계산하고, 결과를 JSON 형태로 저장한 뒤 대시보드와 SVG 스냅샷으로 재사용할 수 있게 설계되었습니다. 특히 배포 빈도, 실패율, 복구 속도, 변경 반영 속도는 운영 품질을 판단하는 핵심 지표로 활용됩니다.
+
 ## 결론
 ClipForge AI는 AI를 활용해 숏폼 콘텐츠 제작의 복잡한 과정을 단순화하고, 누구나 빠르게 콘텐츠를 만들 수 있게 도와주는 프로젝트입니다. 개발 난이도와 실제 활용성을 모두 고려했을 때, 학기 프로젝트로 적합하며 향후 확장 가능성도 높은 주제입니다.
