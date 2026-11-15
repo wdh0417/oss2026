@@ -1,4 +1,4 @@
-name: workflow
+name: CI, build and selective deployment
 
 on:
   push:
@@ -11,19 +11,51 @@ permissions:
   contents: read
 
 jobs:
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      app: ${{ steps.filter.outputs.app }}
+      deploy: ${{ steps.filter.outputs.deploy }}
+      ci: ${{ steps.filter.outputs.ci }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Detect changed paths
+        uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            app:
+              - 'dashboard/**'
+              - 'tools/**'
+              - 'assets/**'
+              - 'README.md'
+              - 'metrics.yml'
+              - 'throughput.yml'
+            deploy:
+              - 'dashboard/**'
+              - 'tools/**'
+              - 'assets/**'
+              - 'README.md'
+              - 'metrics.yml'
+              - 'throughput.yml'
+            ci:
+              - '.github/**'
+              - 'tests/**'
+              - 'requirements-dev.txt'
+
   build:
-    name: Build artifact
+    name: Build release bundle
+    needs: changes
+    if: needs.changes.outputs.app == 'true' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-
       - name: Create bundle
+        shell: bash
         run: |
           mkdir -p dist
           python - <<'PY'
@@ -54,49 +86,30 @@ jobs:
           retention-days: 7
 
   test:
-    name: Lint / Test (Python ${{ matrix.python-version }} / ${{ matrix.os }})
-    needs: build
-    runs-on: ${{ matrix.os }}
+    name: Matrix test
+    needs: changes
+    if: needs.changes.outputs.app == 'true' || needs.changes.outputs.ci == 'true' || github.event_name == 'workflow_dispatch'
     strategy:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest]
-        python-version: ["3.10", "3.12"]
-
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: ${{ matrix.python-version }}
-
-      - name: Install lint tooling
-        run: python -m pip install --upgrade pip ruff
-
-      - name: Download build artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: release-bundle
-          path: dist
-
-      - name: Verify artifact
-        run: python -m zipfile -t dist/release-bundle.zip
-
-      - name: Lint project
-        run: ruff check .
-
-      - name: Run tests
-        run: python -m unittest discover -s tests -v
+        python-version: ['3.10', '3.12']
+    uses: ./.github/workflows/reusable-ci.yml
+    with:
+      os: ${{ matrix.os }}
+      python-version: ${{ matrix.python-version }}
 
   deploy:
-    name: Deploy artifact
-    needs: test
+    name: Deploy production bundle
+    needs: [changes, build, test]
+    if: >-
+      github.event_name == 'push' &&
+      github.ref == 'refs/heads/main' &&
+      needs.changes.outputs.deploy == 'true' &&
+      needs.build.result == 'success' &&
+      needs.test.result == 'success'
     runs-on: ubuntu-latest
-    # PR에서는 실제 배포하지 않고 main에 반영된 경우에만 배포합니다.
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-
+    environment: production
     steps:
       - name: Download build artifact
         uses: actions/download-artifact@v4
@@ -108,13 +121,14 @@ jobs:
         env:
           DEPLOY_URL: ${{ secrets.DEPLOY_URL }}
           DEPLOY_TOKEN: ${{ secrets.DEPLOY_TOKEN }}
+        shell: bash
         run: |
-          if [ -n "$DEPLOY_URL" ] && [ -n "$DEPLOY_TOKEN" ]; then
-            curl --fail --silent --show-error --retry 3 \
-              -X POST \
-              -H "Authorization: Bearer $DEPLOY_TOKEN" \
-              -F "file=@dist/release-bundle.zip" \
-              "$DEPLOY_URL"
-          else
+          if [[ -z "$DEPLOY_URL" || -z "$DEPLOY_TOKEN" ]]; then
             echo "Deployment skipped: configure DEPLOY_URL and DEPLOY_TOKEN secrets."
+            exit 0
           fi
+          curl --fail --silent --show-error --retry 3 \
+            -X POST \
+            -H "Authorization: Bearer $DEPLOY_TOKEN" \
+            -F "file=@dist/release-bundle.zip" \
+            "$DEPLOY_URL"
