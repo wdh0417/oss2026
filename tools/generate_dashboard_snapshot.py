@@ -1,10 +1,12 @@
-#!/usr/bin/env python3
 import json
+from pathlib import Path
+
+metrics_file = Path(__file__).resolve().parents[1] / "dashboard" / "metrics.json"
 
 try:
-    with open("metrics.json") as f:
+    with metrics_file.open(encoding="utf-8") as f:
         m = json.load(f)
-except Exception:
+except (OSError, json.JSONDecodeError):
     m = None
 
 parts = []
