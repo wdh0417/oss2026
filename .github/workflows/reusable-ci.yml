@@ -1,0 +1,120 @@
+name: Reusable Python CI
+
+on:
+  workflow_call:
+    inputs:
+      os:
+        description: Runner operating system.
+        required: true
+        type: string
+      python-version:
+        description: Python version to test.
+        required: true
+        type: string
+
+jobs:
+  test:
+    name: Python ${{ inputs.python-version }} / ${{ inputs.os }}
+    runs-on: ${{ inputs.os }}
+    timeout-minutes: 15
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python and install dependencies
+        uses: ./.github/actions/python-setup
+        with:
+          python-version: ${{ inputs.python-version }}
+
+      - name: Measure uncached and cached installation times
+        id: benchmark
+        shell: bash
+        run: |
+          python - <<'PY'
+          import os
+          import subprocess
+          import sys
+          import time
+          from pathlib import Path
+
+          requirements = "requirements-dev.txt"
+          root = Path(os.environ["RUNNER_TEMP"])
+
+          def measure(label: str, *pip_args: str) -> float:
+              target = root / f"benchmark-{label}"
+              start = time.perf_counter()
+              subprocess.run(
+                  [
+                      sys.executable, "-m", "pip", "install",
+                      "--disable-pip-version-check",
+                      "--target", str(target),
+                      *pip_args,
+                      "-r", requirements,
+                  ],
+                  check=True,
+              )
+              return time.perf_counter() - start
+
+          # 다운로드 캐시를 끄고 설치한 시간을 측정합니다.
+          uncached = measure("uncached", "--no-cache-dir")
+
+          # Composite Action이 dependencies 설치 시 채운 pip 캐시를 사용합니다.
+          cached = measure("cached")
+
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
+              output.write(f"uncached={uncached:.2f}\n")
+              output.write(f"cached={cached:.2f}\n")
+
+          print(f"Uncached install: {uncached:.2f}s")
+          print(f"Cached install:   {cached:.2f}s")
+          PY
+
+      - name: Run Ruff lint
+        run: ruff check .
+
+      - name: Run unit tests
+        run: python -m unittest discover -s tests -v
+
+      - name: Write cache benchmark report
+        shell: bash
+        env:
+          UNCACHED_SECONDS: ${{ steps.benchmark.outputs.uncached }}
+          CACHED_SECONDS: ${{ steps.benchmark.outputs.cached }}
+          MATRIX_OS: ${{ inputs.os }}
+          MATRIX_PYTHON: ${{ inputs.python-version }}
+        run: |
+          python - <<'PY'
+          import os
+          from pathlib import Path
+
+          uncached = float(os.environ["UNCACHED_SECONDS"])
+          cached = float(os.environ["CACHED_SECONDS"])
+          saved = uncached - cached
+          improvement = (saved / uncached * 100) if uncached > 0 else 0.0
+
+          report = Path("ci-cache-benchmark.md")
+          report.write_text(
+              "# CI dependency-cache benchmark\n\n"
+              "Install durations measured on the same runner. "
+              "The cached run uses the pip cache populated during Python setup.\n\n"
+              "Improvement = (uncached time - cached time) / uncached time × 100.\n\n"
+              "| OS | Python | Cache off (s) | Cache on (s) | Time saved (s) | Improvement |\n"
+              "|---|---:|---:|---:|---:|---:|\n"
+              f"| {os.environ['MATRIX_OS']} | {os.environ['MATRIX_PYTHON']} "
+              f"| {uncached:.2f} | {cached:.2f} | {saved:.2f} | {improvement:.1f}% |\n",
+              encoding="utf-8",
+          )
+
+          with open(os.environ["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8") as summary:
+              summary.write(report.read_text(encoding="utf-8"))
+          print(f"Measured cache improvement: {improvement:.1f}%")
+          PY
+
+      - name: Upload benchmark report
+        uses: actions/upload-artifact@v4
+        with:
+          name: cache-benchmark-${{ inputs.os }}-py${{ inputs.python-version }}
+          path: ci-cache-benchmark.md
+          if-no-files-found: error
+          retention-days: 30
