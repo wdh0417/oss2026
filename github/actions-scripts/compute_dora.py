@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
+import json
 import os
 import sys
-import json
 import time
+from datetime import UTC, datetime, timedelta
+
 import requests
-from datetime import datetime, timedelta, timezone
 from dateutil import parser as dateparser
 
 GITHUB_TOKEN = os.getenv("GITHUB_TOKEN")
@@ -62,7 +63,7 @@ def parse_iso(s):
 
 
 def iso_now_minus_days(days):
-    dt = datetime.now(timezone.utc) - timedelta(days=days)
+    dt = datetime.now(UTC) - timedelta(days=days)
     return dt.isoformat()
 
 
@@ -113,9 +114,10 @@ def main():
             if latest is None:
                 latest = s
             else:
-                if parse_iso(s.get("created_at")) and parse_iso(latest.get("created_at")):
-                    if parse_iso(s.get("created_at")) > parse_iso(latest.get("created_at")):
-                        latest = s
+                s_created_at = parse_iso(s.get("created_at"))
+                latest_created_at = parse_iso(latest.get("created_at"))
+                if s_created_at and latest_created_at and s_created_at > latest_created_at:
+                    latest = s
         deployments_info.append({
             "id": d_id,
             "sha": d.get("sha"),
@@ -167,7 +169,7 @@ def main():
 
     metrics = {
         "window_days": WINDOW_DAYS,
-        "as_of": datetime.now(timezone.utc).isoformat(),
+        "as_of": datetime.now(UTC).isoformat(),
         "deployment_count": total_deploys,
         "successful_deployments": len(successful_deploys),
         "failed_deployments": len(failed_deploys),
