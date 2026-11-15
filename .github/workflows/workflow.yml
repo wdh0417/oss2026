@@ -1,0 +1,117 @@
+name: workflow
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  lint_and_test:
+    name: Lint / Test (${{ matrix.python-version }} / ${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        python-version: ['3.10', '3.12']
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install lint tooling
+        shell: bash
+        run: python -m pip install --upgrade pip ruff
+
+      - name: Lint project
+        shell: bash
+        run: ruff check .
+
+      - name: Run tests
+        shell: bash
+        run: python -m unittest discover -s tests -v
+
+  build:
+    name: Build artifact
+    needs: lint_and_test
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Create bundle
+        shell: bash
+        run: |
+          mkdir -p dist
+          python - <<'PY'
+          import os
+          import zipfile
+          root = os.getcwd()
+          output = os.path.join(root, 'dist', 'release-bundle.zip')
+          with zipfile.ZipFile(output, 'w', compression=zipfile.ZIP_DEFLATED) as zf:
+              for folder in ('dashboard', 'tools', 'assets'):
+                  if os.path.exists(folder):
+                      for dirpath, _, filenames in os.walk(folder):
+                          for filename in filenames:
+                              full = os.path.join(dirpath, filename)
+                              arc = os.path.relpath(full, root)
+                              zf.write(full, arc)
+              for filename in ('README.md', 'metrics.yml', 'throughput.yml'):
+                  if os.path.exists(filename):
+                      zf.write(filename, filename)
+          print(f'Created {output}')
+          PY
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-bundle
+          path: dist/release-bundle.zip
+          if-no-files-found: error
+          retention-days: 7
+
+  deploy:
+    name: Deploy artifact
+    needs: build
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Download build artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: release-bundle
+          path: dist
+
+      - name: Deploy to target
+        env:
+          DEPLOY_URL: ${{ secrets.DEPLOY_URL }}
+          DEPLOY_TOKEN: ${{ secrets.DEPLOY_TOKEN }}
+        shell: bash
+        run: |
+          if [ -n "$DEPLOY_URL" ] && [ -n "$DEPLOY_TOKEN" ]; then
+            echo "Deploying bundle to $DEPLOY_URL"
+            curl --fail --silent --show-error --retry 3 \
+              -X POST \
+              -H "Authorization: Bearer $DEPLOY_TOKEN" \
+              -F "file=@dist/release-bundle.zip" \
+              "$DEPLOY_URL"
+          else
+            echo "Deployment skipped: DEPLOY_URL and DEPLOY_TOKEN secrets are not configured."
+            echo "Artifact is available in Actions and can be downloaded manually."
+          fi
